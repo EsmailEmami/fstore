@@ -3,7 +3,6 @@ package fileserver
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -15,19 +14,26 @@ import (
 	"github.com/esmailemami/fstore/pkg/utils/security"
 )
 
-var (
-	ErrInvalidMessageType = errors.New("unexpected message")
-)
+// ErrInvalidMessageType is returned when an unexpected message type is encountered.
+var ErrInvalidMessageType = errors.New("unexpected message")
 
+// ErrFileNotExists is returned when a requested file does not exist.
+var ErrFileNotExists = errors.New("sorry. file not found")
+
+// ErrFileNotExists is returned when a peer does not exist.
+var ErrPeerNotFound = errors.New("peer not found")
+
+// FileServerOpts contains configuration options for FileServer.
 type FileServerOpts struct {
-	Transport          p2p.Transport
-	BootstrapNodes     []string
-	MessageTransformer MessageTransformer
-	KeyEncrypter       security.TextEncrypter
-	EncKey             []byte
-	Encrypter          security.IOEncrypter
+	Transport          p2p.Transport          // Transport interface for communication
+	BootstrapNodes     []string               // List of bootstrap nodes to connect to initially
+	MessageTransformer MessageTransformer     // MessageTransformer for encoding/decoding messages
+	KeyEncrypter       security.TextEncrypter // KeyEncrypter for encrypting file keys
+	EncKey             []byte                 // Encryption key for Encrypter
+	Encrypter          security.IOEncrypter   // Encrypter for encrypting file data
 }
 
+// prepare initializes default values for FileServerOpts if not provided.
 func (f *FileServerOpts) prepare() {
 	if f.MessageTransformer == nil {
 		f.MessageTransformer = NewAESGCMMessageTransformer([]byte("thisis32bitlongpassphraseimusing"))
@@ -42,28 +48,30 @@ func (f *FileServerOpts) prepare() {
 	}
 }
 
+// FileServer represents a server that manages file storage and communication with peers.
 type FileServer struct {
-	FileServerOpts
-
-	store *store.Store
-
-	peerLock sync.RWMutex
-	peers    map[string]p2p.Peer
-
-	quitch chan struct{}
+	FileServerOpts                     // Embedded configuration options
+	store          *store.Store        // Local file storage
+	peerLock       sync.RWMutex        // Mutex for peers map access
+	peers          map[string]p2p.Peer // Map of connected peers
+	quitch         chan struct{}       // Channel for quitting
 }
 
+// NewFileServer creates a new FileServer instance with the provided options.
 func NewFileServer(opts FileServerOpts) *FileServer {
 	opts.prepare()
 
+	// Configure store options
 	storeOpts := store.StoreOpts{
 		RootPath:          fmt.Sprintf("storage/server%s", opts.Transport.Addr()),
 		PathTransformFunc: store.MD5PathTransformFunc,
 		Encrypter:         security.NewAESGCMIOEncrypter(opts.EncKey),
 	}
 
+	// Create a new store instance
 	store := store.NewStore(storeOpts)
 
+	// Initialize FileServer instance
 	fs := &FileServer{
 		FileServerOpts: opts,
 		peerLock:       sync.RWMutex{},
@@ -72,34 +80,41 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 		store:          store,
 	}
 
+	// Register peer connect and disconnect callbacks
 	fs.Transport.OnPeerConnect(fs.onConnectPeer)
 	fs.Transport.OnPeerDisconnect(fs.onDisconnectPeer)
 
 	return fs
 }
 
+// Start starts the FileServer, listens on the transport, and connects to bootstrap nodes.
 func (fs *FileServer) Start() error {
+	// Listen on transport
 	if err := fs.Transport.Listen(); err != nil {
 		return err
 	}
 
+	// Connect to bootstrap nodes
 	if err := fs.boostrapNodes(); err != nil {
 		return err
 	}
 
+	// Start listening for incoming messages
 	go fs.listen()
 
-	logging.Info("File Server started.", "listenAddr", fs.Transport.Addr())
+	logging.Info("[FileServer] started.", "listenAddr", fs.Transport.Addr())
 
 	return nil
 }
 
+// boostrapNodes connects to the specified bootstrap nodes.
 func (fs *FileServer) boostrapNodes() error {
 	for _, addr := range fs.BootstrapNodes {
-		logging.Debug("File Server Dial", "listenAddr", fs.Transport.Addr(), "addr", addr)
+		logging.Debug("[FileServer] dialing", "listenAddr", fs.Transport.Addr(), "addr", addr)
 
+		// Dial each bootstrap node
 		if err := fs.Transport.Dial(addr); err != nil {
-			logging.WarnE("File Server failed to dial node", err, "listenAddr", fs.Transport.Addr(), "boostrapAddr", addr)
+			logging.WarnE("[FileServer] failed to dial node", err, "listenAddr", fs.Transport.Addr(), "boostrapAddr", addr)
 			return err
 		}
 	}
@@ -107,9 +122,10 @@ func (fs *FileServer) boostrapNodes() error {
 	return nil
 }
 
+// listen listens for incoming messages and handles them asynchronously.
 func (fs *FileServer) listen() {
 	defer func() {
-		logging.Warn("File Server closing the transport...", "listenAddr", fs.Transport.Addr())
+		logging.Warn("[FileServer] closing the transport...", "listenAddr", fs.Transport.Addr())
 		fs.Transport.Close()
 	}()
 
@@ -117,62 +133,74 @@ func (fs *FileServer) listen() {
 		select {
 		case rpc := <-fs.Transport.Consume():
 			var msg Message
+
+			// Decode incoming message
 			if err := fs.MessageTransformer.Decode(bytes.NewReader(rpc.Payload), &msg); err != nil {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				logging.ErrorE("File Server failed to decode", err, "listenAddr", fs.Transport.Addr(), "payload", rpc.Payload)
+				logging.ErrorE("[FileServer] failed to decode", err, "listenAddr", fs.Transport.Addr(), "payload", rpc.Payload)
 				continue
 			}
 
+			// Handle message asynchronously
 			go func(msg Message) {
 				if err := fs.handleMessage(rpc.From, msg); err != nil {
-					logging.Warn("File Server failed to handle message", err, "listenAddr", fs.Transport.Addr())
+					logging.Warn("[FileServer] failed to handle message", err, "listenAddr", fs.Transport.Addr())
 				}
 			}(msg)
+
 		case <-fs.quitch:
-			logging.Warn("File Server closing...")
+			logging.Warn("[FileServer] closing...")
 			return
 		}
 	}
 }
 
+// onDisconnectPeer handles disconnection of a peer.
 func (fs *FileServer) onDisconnectPeer(peer p2p.Peer) {
 	fs.peerLock.Lock()
 	delete(fs.peers, peer.RemoteAddr().String())
 	fs.peerLock.Unlock()
 
-	logging.Info("File Server Peer Disconnected", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String())
+	logging.Info("[FileServer] peer disconnected", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String())
 }
 
+// onConnectPeer handles connection of a new peer.
 func (fs *FileServer) onConnectPeer(peer p2p.Peer) {
 	fs.peerLock.Lock()
 	fs.peers[peer.RemoteAddr().String()] = peer
 	fs.peerLock.Unlock()
 
-	logging.Info("File Server New Peer Connected", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String())
+	logging.Info("[FileServer] peer connected", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String())
 }
 
+// Stop stops the FileServer.
 func (fs *FileServer) Stop() {
 	close(fs.quitch)
 }
 
+// Store stores a file from the given reader to local storage and peers.
 func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
-	var (
-		encKey     = fs.KeyEncrypter.Encrypt(key)
-		fileBuffer = new(bytes.Buffer)
-		tee        = io.TeeReader(r, fileBuffer)
-	)
+	// Encrypt key
+	encKey := fs.KeyEncrypter.Encrypt(key)
 
+	// Buffer for storing file data
+	fileBuffer := new(bytes.Buffer)
+	tee := io.TeeReader(r, fileBuffer)
+
+	// Write to local store
 	n, err := fs.store.Write(encKey, tee)
 	if err != nil {
 		return 0, err
 	}
 
-	logging.Info("File Server locally stored.", "listenAddr", fs.Transport.Addr(), "size", n)
+	logging.Info("[FileServer] file stored to local storage.", "listenAddr", fs.Transport.Addr(), "size", n)
 
+	// MultiWriter for writing to multiple peers
 	mu := fs.multiWriter()
 
+	// Prepare store message
 	msg := Message{
 		Payload: MessageStoreFile{
 			Key:      encKey,
@@ -180,16 +208,17 @@ func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
 		},
 	}
 
+	// Send store message
 	if err := fs.sendMessage(mu, &msg); err != nil {
 		return 0, err
 	}
 
-	// notify incomming is stream
+	// Notify incoming stream
 	if _, err := mu.Write(p2p.LockMessage); err != nil {
 		return 0, err
 	}
 
-	// write encrypted bytes to peers
+	// Encrypt and send file data to peers
 	if _, err := fs.Encrypter.Encrypt(fileBuffer, mu); err != nil {
 		return 0, err
 	}
@@ -197,32 +226,38 @@ func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
 	return n, nil
 }
 
+// Get retrieves a file identified by key from local storage or peers.
 func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
+	// Encrypt key
 	encKey := fs.KeyEncrypter.Encrypt(key)
+
+	// Check if file exists in local storage
 	if fs.store.Has(encKey) {
 		return fs.store.Read(encKey)
 	}
 
-	logging.Info("trying to get file from peers...", "listenAddr", fs.Transport.Addr())
+	logging.Info("[FileServer] file not found in local storage. trying to find from peers...", "listenAddr", fs.Transport.Addr())
 
+	// Prepare message for requesting file from peers
 	msg := Message{
 		Payload: MessageGetFileRequest{
 			Key: encKey,
 		},
 	}
 
-	settedFromPeer := false
+	fileExists := false
 
+	// Iterate through connected peers
 	for _, peer := range fs.peers {
 
-		// send the request
+		// Send request to peer
 		if err := fs.sendMessage(peer, &msg); err != nil {
 			return 0, nil, err
 		}
 
-		logging.Info("trying to get file from peer, decoding message...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+		logging.Info("[FileServer] requesting file from peer...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
 
-		// get response
+		// Read response from peer
 		msg, err := fs.readMessage(peer)
 		if err != nil {
 			peer.UnLock()
@@ -230,173 +265,67 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 		}
 		resp := msg.Payload.(MessageGetFileResponse)
 
-		logging.Info("Response got", "resp", resp)
-
-		// not exists or not streaming
+		// Check if file exists and is streamable
 		if !resp.Exists || !resp.Stream {
 			peer.UnLock()
 			continue
 		}
 
-		logging.Info("got file size. writting to local storage...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "size", resp.Size)
+		logging.Info("[FileServer] peer has the file. reading...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "size", resp.Size)
 
+		// Write decrypted file data to local store
 		if _, err := fs.store.WriteDecrypt(encKey, io.LimitReader(peer, resp.Size)); err != nil {
 			peer.UnLock()
 			return 0, nil, err
 		}
 
-		logging.Info("file got successfully from peer", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+		logging.Info("[FileServer] file read.", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
 
 		peer.UnLock()
-		settedFromPeer = true
+		fileExists = true
 		break
 	}
 
-	if settedFromPeer {
+	// Return file data from local store if found
+	if fileExists {
 		return fs.store.Read(encKey)
 	}
 
-	return 0, nil, errors.New("file not found")
+	// Return error if file not found
+	return 0, nil, ErrFileNotExists
 }
 
-func (fs *FileServer) handleMessage(from string, msg Message) error {
-	fs.peerLock.RLock()
-	peer, ok := fs.peers[from]
-	fs.peerLock.RUnlock()
+// readMessage reads and decodes a message from the given reader.
+func (fs *FileServer) readMessage(r io.Reader) (*Message, error) {
+	// Read message size from binary
+	var size int64
+	binary.Read(r, binary.LittleEndian, &size)
 
-	if !ok {
-		return fmt.Errorf("peer with addr (%s) not found", from)
+	// Decode the message using MessageTransformer
+	var msg Message
+	if err := fs.MessageTransformer.Decode(io.LimitReader(r, size), &msg); err != nil {
+		logging.ErrorE("[FileServer] failed to decode", err, "listenAddr", fs.Transport.Addr())
+		return nil, err
 	}
-
-	switch payload := msg.Payload.(type) {
-	case MessageGetFileRequest:
-		return fs.handleMessageGetFileRequest(peer, payload)
-	case MessageStoreFile:
-		return fs.handleMessageStoreFile(peer, payload)
-	}
-
-	return ErrInvalidMessageType
+	return &msg, nil
 }
 
-type MessageGetFileRequest struct {
-	Key string
-}
-
-type MessageGetFileResponse struct {
-	Exists bool
-	Size   int64
-	Stream bool
-}
-
-func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetFileRequest) error {
-	logging.Info("message get file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
-
-	// lock the peer for giving the response
-	if err := peer.Lock(); err != nil {
+// sendMessage sends a message to the given writer.
+func (fs *FileServer) sendMessage(w io.Writer, msg *Message) error {
+	// Notify incoming message type
+	if _, err := w.Write(p2p.TextMessage); err != nil {
 		return err
 	}
 
-	// logging.Info("locked...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
-
-	resp := MessageGetFileResponse{}
-
-	if !fs.store.Has(msg.Key) {
-		logging.Info("file does not exists", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
-
-		// set not stream content
-		resp.Exists = false
-		resp.Stream = false
-
-		if err := fs.MessageTransformer.Encode(peer, &Message{Payload: resp}); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	logging.Info("file exists. processing...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
-
-	n, f, err := fs.store.Read(msg.Key)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	logging.Info("file readed. ", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
-
-	// send the data before streaming
-	resp.Exists = true
-	resp.Size = n
-	resp.Stream = true
-	if err := fs.MessageTransformer.Encode(peer, &Message{Payload: resp}); err != nil {
-		return err
-	}
-
-	logging.Info("writting file to peer", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
-
-	// // if err := binary.Write(peer, binary.LittleEndian, n); err != nil {
-	// // 	return err
-	// // }
-
-	if _, err := io.Copy(peer, f); err != nil {
-		return err
-	}
-
-	logging.Info("writting file completed", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
-
-	return nil
+	// Encode and send message using MessageTransformer
+	return fs.MessageTransformer.Encode(w, msg)
 }
 
-type MessageStoreFile struct {
-	Key      string
-	FileSize int64
-}
-
-func (fs *FileServer) handleMessageStoreFile(peer p2p.Peer, msg MessageStoreFile) error {
-	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "size", msg.FileSize)
-
-	n, err := fs.store.Write(msg.Key, io.LimitReader(peer, msg.FileSize))
-
-	logging.Debug("File Server store called. read done", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "writtenSize", n, "calledSize", msg.FileSize)
-
-	peer.UnLock()
-
-	return err
-}
-
+// multiWriter returns a writer that writes to all connected peers simultaneously.
 func (fs *FileServer) multiWriter() io.Writer {
 	peers := []io.Writer{}
 	for _, peer := range fs.peers {
 		peers = append(peers, peer)
 	}
 	return io.MultiWriter(peers...)
-}
-
-func (fs *FileServer) readMessage(r io.Reader) (*Message, error) {
-	// take the size from binary
-	var size int64
-	binary.Read(r, binary.LittleEndian, &size)
-
-	// decode the message
-	var msg Message
-	if err := fs.MessageTransformer.Decode(io.LimitReader(r, size), &msg); err != nil {
-		logging.ErrorE("File Server failed to decode", err, "listenAddr", fs.Transport.Addr())
-		return nil, err
-	}
-	return &msg, nil
-}
-
-func (fs *FileServer) sendMessage(w io.Writer, msg *Message) error {
-	// notify incomming message type
-	if _, err := w.Write(p2p.TextMessage); err != nil {
-		return err
-	}
-
-	return fs.MessageTransformer.Encode(w, msg)
-}
-
-func init() {
-	gob.Register(MessageGetFileRequest{})
-	gob.Register(MessageGetFileResponse{})
-	gob.Register(MessageStoreFile{})
 }
