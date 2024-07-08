@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"encoding/binary"
 	"io"
 )
 
@@ -28,15 +29,19 @@ func (dec DefaultDecoder) Decode(r io.Reader, msg *RPC) error {
 		return err
 	}
 
-	if peekBuf[0] == StreamMessage {
-		msg.isStream = true
+	// logging.Info("tcp decoder called", "peek", peekBuf[0])
+
+	if peekBuf[0] == lockMessage {
+		msg.lock = true
 		return nil
-	} else if peekBuf[0] == TextMessage {
-		msg.isText = true
 	}
 
-	// normal messaging
-	buf := make([]byte, 1024)
+	// take the size from binary
+	var size int64
+	binary.Read(r, binary.LittleEndian, &size)
+
+	// take the payload
+	buf := make([]byte, size)
 	n, err := r.Read(buf)
 	if err != nil {
 		return err

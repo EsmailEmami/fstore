@@ -6,9 +6,8 @@ type Peer interface {
 	RemoteAddr() net.Addr
 	Read(b []byte) (n int, err error)
 	Write(b []byte) (n int, err error)
-	TextNotify() error
-	StreamNotify() error
-	CloseStream()
+	Lock() error
+	UnLock()
 }
 
 type PeerFunc func(Peer)

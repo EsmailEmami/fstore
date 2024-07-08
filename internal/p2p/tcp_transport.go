@@ -12,13 +12,13 @@ import (
 type TCPPeer struct {
 	conn net.Conn
 
-	streamingwg sync.WaitGroup
+	lockWg sync.WaitGroup
 }
 
 func NewTCPPeer(conn net.Conn) *TCPPeer {
 	return &TCPPeer{
-		conn:        conn,
-		streamingwg: sync.WaitGroup{},
+		conn:   conn,
+		lockWg: sync.WaitGroup{},
 	}
 }
 
@@ -35,16 +35,12 @@ func (t *TCPPeer) Write(b []byte) (n int, err error) {
 
 }
 
-func (t *TCPPeer) TextNotify() error {
-	_, err := t.conn.Write([]byte{TextMessage})
+func (t *TCPPeer) Lock() error {
+	_, err := t.conn.Write(LockMessage)
 	return err
 }
-func (t *TCPPeer) StreamNotify() error {
-	_, err := t.conn.Write([]byte{StreamMessage})
-	return err
-}
-func (t *TCPPeer) CloseStream() {
-	t.streamingwg.Done()
+func (t *TCPPeer) UnLock() {
+	t.lockWg.Done()
 }
 
 type TCPTransportOpts struct {
@@ -170,11 +166,11 @@ func (t *TCPTransport) handleConn(conn net.Conn) {
 		}
 
 		// needs to block reading
-		if msg.isStream {
-			peer.streamingwg.Add(1)
-			logging.Info("Peer is streaming...", "listenAddr", t.LinstenAddr, "peerAddr", conn.RemoteAddr().String())
-			peer.streamingwg.Wait()
-			logging.Info("Peer is streaming is done. continueing...", "listenAddr", t.LinstenAddr, "peerAddr", conn.RemoteAddr().String())
+		if msg.lock {
+			peer.lockWg.Add(1)
+			logging.Info("Peer locked...", "listenAddr", t.LinstenAddr, "peerAddr", conn.RemoteAddr().String())
+			peer.lockWg.Wait()
+			logging.Info("Peer unlocked. continueing...", "listenAddr", t.LinstenAddr, "peerAddr", conn.RemoteAddr().String())
 			continue
 		}
 

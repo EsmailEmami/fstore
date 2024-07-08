@@ -1,14 +1,18 @@
 package p2p
 
 const (
-	StreamMessage = 0x0
-	TextMessage   = 0x1
+	textMessage = 0x0
+	lockMessage = 0x1
+)
+
+var (
+	LockMessage = []byte{lockMessage}
+	TextMessage = []byte{textMessage}
 )
 
 type RPC struct {
 	From    string
 	Payload []byte
 
-	isStream bool
-	isText   bool
+	lock bool
 }

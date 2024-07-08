@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -70,6 +71,12 @@ func (se *AESGCMMessageTransformer) Encode(w io.Writer, msg *Message) error {
 
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
 
+	// notify the size
+	if err := binary.Write(w, binary.LittleEndian, int64(len(ciphertext))); err != nil {
+		return err
+	}
+
+	// write the message
 	_, err = w.Write(ciphertext)
 	return err
 }
@@ -137,6 +144,11 @@ func (e *ChaCha20Poly1305MessageTransformer) Encode(w io.Writer, msg *Message) e
 	}
 
 	ciphertext := aead.Seal(nonce, nonce, plaintext, nil)
+
+	// notify the size
+	if err := binary.Write(w, binary.LittleEndian, int64(len(ciphertext))); err != nil {
+		return err
+	}
 
 	_, err = w.Write(ciphertext)
 	return err
