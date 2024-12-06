@@ -10,6 +10,7 @@ import (
 
 type IOEncrypter interface {
 	Size(originalSize int64) int64
+	DecryptSize(encryptedSize int64) int64
 	Encrypt(src io.Reader, dst io.Writer) (int64, error)
 	Decrypt(src io.Reader, dst io.Writer) (int64, error)
 }
@@ -53,6 +54,30 @@ func (e *AESGCMIOEncrypter) Size(originalSize int64) int64 {
 	encryptedSize := originalSize + int64(e.gcm.NonceSize()) + numChunks*int64(e.gcm.Overhead())
 
 	return encryptedSize
+}
+
+func (e *AESGCMIOEncrypter) DecryptSize(encryptedSize int64) int64 {
+	// Subtract the size of the nonce (added at the beginning of the encrypted data)
+	remainingSize := encryptedSize - int64(e.gcm.NonceSize())
+	if remainingSize < 0 {
+		// If remaining size is less than 0, the encrypted data is invalid
+		panic("invalid encrypted size")
+	}
+
+	// Calculate the number of chunks in the encrypted data
+	overheadPerChunk := int64(e.gcm.Overhead())
+	chunkDataSize := int64(e.chunkSize) + overheadPerChunk
+	numChunks := (remainingSize + chunkDataSize - 1) / chunkDataSize
+
+	// Subtract the overhead added by the GCM per chunk
+	originalSize := remainingSize - numChunks*overheadPerChunk
+
+	if originalSize < 0 {
+		// If the calculated original size is negative, the input is invalid
+		panic("invalid encrypted size or chunk size")
+	}
+
+	return originalSize
 }
 
 func (e *AESGCMIOEncrypter) Encrypt(src io.Reader, dst io.Writer) (int64, error) {

@@ -14,6 +14,8 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+var Transformer MessageTransformer
+
 var (
 	ErrCipherTextTooShort = errors.New("ciphertext too short")
 )
@@ -179,4 +181,8 @@ func (e *ChaCha20Poly1305MessageTransformer) Decode(r io.Reader, msg *Message) e
 	buf := bytes.NewBuffer(plaintext)
 	dec := gob.NewDecoder(buf)
 	return dec.Decode(msg)
+}
+
+func init() {
+	Transformer = NewAESGCMMessageTransformer([]byte("thisis32bitlongpassphraseimusing"))
 }

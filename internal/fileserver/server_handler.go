@@ -50,10 +50,9 @@ func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetF
 
 		// Set response flags for non-existent file
 		resp.Exists = false
-		resp.Stream = false
 
 		// Encode and send response to peer
-		if err := fs.MessageTransformer.Encode(peer, &Message{Payload: resp}); err != nil {
+		if err := Transformer.Encode(peer, &Message{Payload: resp}); err != nil {
 			return err
 		}
 
@@ -73,18 +72,24 @@ func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetF
 
 	// Set response flags for existing file
 	resp.Exists = true
-	resp.Size = n
-	resp.Stream = true
+	//resp.Size = n
+
+	resp.Size = fs.Encrypter.DecryptSize(n)
 
 	// Encode and send response to peer
-	if err := fs.MessageTransformer.Encode(peer, &Message{Payload: resp}); err != nil {
+	if err := Transformer.Encode(peer, &Message{Payload: resp}); err != nil {
 		return err
 	}
 
 	logging.Info("writing file to peer", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
 
 	// Copy file data to peer
-	if _, err := io.Copy(peer, f); err != nil {
+
+	// if _, err := io.Copy(peer, f); err != nil {
+	// 	return err
+	// }
+
+	if _, err := fs.Encrypter.Decrypt(f, peer); err != nil {
 		return err
 	}
 
@@ -98,7 +103,7 @@ func (fs *FileServer) handleMessageStoreFile(peer p2p.Peer, msg MessageStoreFile
 	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "size", msg.FileSize)
 
 	// Write file data received from peer to local store
-	n, err := fs.store.Write(msg.Key, io.LimitReader(peer, msg.FileSize))
+	n, err := fs.store.WriteEncrypt(msg.Key, io.LimitReader(peer, msg.FileSize))
 
 	logging.Debug("File Server store called. read done", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "writtenSize", n, "calledSize", msg.FileSize)
 
@@ -117,7 +122,6 @@ type MessageGetFileRequest struct {
 type MessageGetFileResponse struct {
 	Exists bool
 	Size   int64
-	Stream bool
 }
 
 // MessageStoreFile defines the structure of a file storage message.

@@ -25,20 +25,15 @@ var ErrPeerNotFound = errors.New("peer not found")
 
 // FileServerOpts contains configuration options for FileServer.
 type FileServerOpts struct {
-	Transport          p2p.Transport          // Transport interface for communication
-	BootstrapNodes     []string               // List of bootstrap nodes to connect to initially
-	MessageTransformer MessageTransformer     // MessageTransformer for encoding/decoding messages
-	KeyEncrypter       security.TextEncrypter // KeyEncrypter for encrypting file keys
-	EncKey             []byte                 // Encryption key for Encrypter
-	Encrypter          security.IOEncrypter   // Encrypter for encrypting file data
+	Transport      p2p.Transport          // Transport interface for communication
+	BootstrapNodes []string               // List of bootstrap nodes to connect to initially
+	KeyEncrypter   security.TextEncrypter // KeyEncrypter for encrypting file keys
+	EncKey         []byte                 // Encryption key for Encrypter
+	Encrypter      security.IOEncrypter   // Encrypter for encrypting file data
 }
 
 // prepare initializes default values for FileServerOpts if not provided.
 func (f *FileServerOpts) prepare() {
-	if f.MessageTransformer == nil {
-		f.MessageTransformer = NewAESGCMMessageTransformer([]byte("thisis32bitlongpassphraseimusing"))
-	}
-
 	if f.KeyEncrypter == nil {
 		f.KeyEncrypter = &security.SHA1TextEncrypter{}
 	}
@@ -65,7 +60,7 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 	storeOpts := store.StoreOpts{
 		RootPath:          fmt.Sprintf("storage/server%s", opts.Transport.Addr()),
 		PathTransformFunc: store.MD5PathTransformFunc,
-		Encrypter:         security.NewAESGCMIOEncrypter(opts.EncKey),
+		Encrypter:         opts.Encrypter,
 	}
 
 	// Create a new store instance
@@ -134,8 +129,10 @@ func (fs *FileServer) listen() {
 		case rpc := <-fs.Transport.Consume():
 			var msg Message
 
+			logging.Debug("[FileServer] transport RPC message", "from", rpc.From, "payload", rpc.Payload)
+
 			// Decode incoming message
-			if err := fs.MessageTransformer.Decode(bytes.NewReader(rpc.Payload), &msg); err != nil {
+			if err := Transformer.Decode(bytes.NewReader(rpc.Payload), &msg); err != nil {
 				if errors.Is(err, io.EOF) {
 					return
 				}
@@ -258,23 +255,22 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 		logging.Info("[FileServer] requesting file from peer...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
 
 		// Read response from peer
-		msg, err := fs.readMessage(peer)
+		getFileResponse, err := fs.readGetFileResponse(peer)
 		if err != nil {
-			peer.UnLock()
-			return 0, nil, err
-		}
-		resp := msg.Payload.(MessageGetFileResponse)
-
-		// Check if file exists and is streamable
-		if !resp.Exists || !resp.Stream {
 			peer.UnLock()
 			continue
 		}
 
-		logging.Info("[FileServer] peer has the file. reading...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "size", resp.Size)
+		// Check if file exists and is streamable
+		if !getFileResponse.Exists {
+			peer.UnLock()
+			continue
+		}
+
+		logging.Info("[FileServer] peer has the file. reading...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "size", getFileResponse.Size)
 
 		// Write decrypted file data to local store
-		if _, err := fs.store.WriteDecrypt(encKey, io.LimitReader(peer, resp.Size)); err != nil {
+		if _, err := fs.store.WriteDecrypt(encKey, io.LimitReader(peer, getFileResponse.Size)); err != nil {
 			peer.UnLock()
 			return 0, nil, err
 		}
@@ -303,11 +299,21 @@ func (fs *FileServer) readMessage(r io.Reader) (*Message, error) {
 
 	// Decode the message using MessageTransformer
 	var msg Message
-	if err := fs.MessageTransformer.Decode(io.LimitReader(r, size), &msg); err != nil {
+	if err := Transformer.Decode(io.LimitReader(r, size), &msg); err != nil {
 		logging.ErrorE("[FileServer] failed to decode", err, "listenAddr", fs.Transport.Addr())
 		return nil, err
 	}
 	return &msg, nil
+}
+
+func (fs *FileServer) readGetFileResponse(peer p2p.Peer) (*MessageGetFileResponse, error) {
+	msg, err := fs.readMessage(peer)
+	if err != nil {
+		return nil, err
+	}
+	resp := msg.Payload.(MessageGetFileResponse)
+
+	return &resp, nil
 }
 
 // sendMessage sends a message to the given writer.
@@ -318,7 +324,7 @@ func (fs *FileServer) sendMessage(w io.Writer, msg *Message) error {
 	}
 
 	// Encode and send message using MessageTransformer
-	return fs.MessageTransformer.Encode(w, msg)
+	return Transformer.Encode(w, msg)
 }
 
 // multiWriter returns a writer that writes to all connected peers simultaneously.

@@ -1,17 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
-	"time"
 
 	"github.com/esmailemami/fstore/internal/fileserver"
 	"github.com/esmailemami/fstore/internal/p2p"
 	"github.com/esmailemami/fstore/pkg/logging"
 )
 
-func newServer(listenAddr string, nodes ...string) *fileserver.FileServer {
+func newServer(listenAddr string, encKey []byte, nodes ...string) *fileserver.FileServer {
 	tcpOpts := p2p.TCPTransportOpts{
 		LinstenAddr: listenAddr,
 		Decoder:     p2p.DefaultDecoder{},
@@ -22,7 +22,7 @@ func newServer(listenAddr string, nodes ...string) *fileserver.FileServer {
 	fileServerOpts := fileserver.FileServerOpts{
 		Transport:      tcp,
 		BootstrapNodes: nodes,
-		EncKey:         []byte("thisis32bitlongpassphraseimusing"),
+		EncKey:         encKey,
 	}
 
 	fs := fileserver.NewFileServer(fileServerOpts)
@@ -34,34 +34,30 @@ func newServer(listenAddr string, nodes ...string) *fileserver.FileServer {
 }
 
 func main() {
-	newServer(":3000")
-	s2 := newServer(":4000", ":3000")
-	// newServer(":5000", ":4000", ":3000")
-	// s2 := newServer(":7000", ":5000")
+	fileserver.Transformer = fileserver.NewAESGCMMessageTransformer([]byte("thisis32bitlongpassphraseimusing"))
 
-	// content := make([]byte, 1*1024*1024)
-	// io.ReadFull(rand.Reader, content)
+	s1 := newServer(":3000", []byte("thisis32bitlongpassphraseimusing"))
+	_ = s1
+	s2 := newServer(":4000", []byte("thisisexactly32byteslong1234gfg5"), ":3000")
+	_ = s2
+	s3 := newServer(":5000", []byte("32characterslongpassphrase123544"), ":4000", ":3000")
+
+	key := "supersecurefile.png"
+	content := []byte("7 bytes")
+
+	_, err := s3.Store(key, bytes.NewReader(content))
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// for i := 0; i < 100; i++ {
-	// 	content := make([]byte, 20*1024*1024)
-	// 	io.ReadFull(rand.Reader, content)
-	// 	//[]byte("this is a new big file over here!!!")
-	// 	_, err := s2.Store(fmt.Sprintf("myFile%d.jpg", i), bytes.NewReader(content))
+	// 	_, err := s3.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
 	// 	if err != nil {
 	// 		log.Fatal(err)
 	// 	}
 	// }
 
-	// _, err := s2.Store("myFile0.jpg", bytes.NewReader([]byte("this is a new big file over here!!!")))
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	time.Sleep(time.Second)
-
-	fmt.Println("getting file...")
-
-	n, r, err := s2.Get("myFile0.jpg")
+	n, r, err := s3.Get(key)
 	if err != nil {
 		logging.ErrorE(err.Error(), err)
 		select {}
