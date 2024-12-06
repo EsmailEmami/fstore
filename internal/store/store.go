@@ -4,14 +4,11 @@ import (
 	"errors"
 	"io"
 	"os"
-
-	"github.com/esmailemami/fstore/pkg/utils/security"
 )
 
 type StoreOpts struct {
 	RootPath          string
 	PathTransformFunc PathTransformFunc
-	Encrypter         security.IOEncrypter
 }
 
 type Store struct {
@@ -40,32 +37,13 @@ func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return io.Copy(f, r)
 }
 
-func (s *Store) WriteEncrypt(key string, r io.Reader) (int64, error) {
+func (s *Store) NewFile(key string) (io.WriteCloser, error) {
 	f, err := s.openFileForWritting(key)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	return s.Encrypter.Encrypt(r, f)
-}
-
-func (s *Store) WriteDecrypt(key string, r io.Reader) (int64, error) {
-	f, err := s.openFileForWritting(key)
-	if err != nil {
-		return 0, err
-	}
-
-	return s.Encrypter.Decrypt(r, f)
-}
-
-func (s *Store) ReadEncrypt(key string, w io.Writer) (int64, error) {
-	_, r, err := s.Read(key)
-	if err != nil {
-		return 0, err
-	}
-	defer r.Close()
-
-	return s.Encrypter.Decrypt(r, w)
+	return f, nil
 }
 
 func (s *Store) Read(key string) (int64, io.ReadCloser, error) {
@@ -98,4 +76,8 @@ func (s *Store) openFileForWritting(key string) (*os.File, error) {
 func (s *Store) fullFilePath(key string) string {
 	pathKey := s.PathTransformFunc(key)
 	return pathKey.FullFilePath(s.RootPath)
+}
+
+func GenKey(base, key string) string {
+	return base + "/" + key
 }

@@ -39,13 +39,19 @@ func (p PathKey) FullFilePath(prefix ...string) string {
 }
 
 func SHA1PathTransformFunc(key string) PathKey {
+	prefix, key := parseKey(key)
+
 	hash := sha1.Sum([]byte(key))
 	hashStr := hex.EncodeToString(hash[:])
 
 	blocksize := 5
 	hashLen := len(hashStr)
 	sliceLen := (hashLen + blocksize - 1) / blocksize
-	paths := make([]string, 0, sliceLen)
+	paths := make([]string, 0, sliceLen+1)
+
+	if len(prefix) > 0 {
+		paths = append(paths, prefix)
+	}
 
 	for i := 0; i < hashLen; i += blocksize {
 		end := i + blocksize
@@ -61,14 +67,18 @@ func SHA1PathTransformFunc(key string) PathKey {
 	}
 }
 func SHA256PathTransformFunc(key string) PathKey {
+	prefix, key := parseKey(key)
+
 	hash := sha256.Sum256([]byte(key))
 	hashStr := hex.EncodeToString(hash[:])
 
 	blocksize := 6
 	hashLen := len(hashStr)
 	sliceLen := (hashLen + blocksize - 1) / blocksize
-	paths := make([]string, 0, sliceLen)
-
+	paths := make([]string, 0, sliceLen+1)
+	if len(prefix) > 0 {
+		paths = append(paths, prefix)
+	}
 	for i := 0; i < hashLen; i += blocksize {
 		end := i + blocksize
 		if end > hashLen {
@@ -84,12 +94,19 @@ func SHA256PathTransformFunc(key string) PathKey {
 }
 
 func MD5PathTransformFunc(key string) PathKey {
+	prefix, key := parseKey(key)
+
 	hash := md5.Sum([]byte(key))
 	hashStr := hex.EncodeToString(hash[:])
 
 	delimiters := []int{3, 4} // Alternating segment lengths of 3 and 4
 	hashLen := len(hashStr)
 	var paths []string
+
+	if len(prefix) > 0 {
+		paths = append(paths, prefix)
+	}
+
 	pos := 0
 
 	for i := 0; pos < hashLen; i++ {
@@ -106,4 +123,16 @@ func MD5PathTransformFunc(key string) PathKey {
 		FilePath: strings.Join(paths, "/"),
 		FileName: hashStr,
 	}
+}
+
+func parseKey(key string) (string, string) {
+	prefixArr := strings.Split(key, "/")
+
+	var prefix string
+	if len(prefixArr) > 1 {
+		prefix = prefixArr[0]
+		key = strings.TrimPrefix(key, prefix)
+	}
+
+	return prefix, key
 }

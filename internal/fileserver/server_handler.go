@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/esmailemami/fstore/internal/p2p"
+	"github.com/esmailemami/fstore/internal/store"
 	"github.com/esmailemami/fstore/pkg/logging"
 )
 
@@ -27,6 +27,9 @@ func (fs *FileServer) handleMessage(from string, msg Message) error {
 		return fs.handleMessageGetFileRequest(peer, payload)
 	case MessageStoreFile:
 		return fs.handleMessageStoreFile(peer, payload)
+	case MessageIdentifyPeer:
+		return fs.handleMessageIdentifyPeer(peer, payload)
+
 	}
 
 	// Return error for unexpected message type
@@ -34,19 +37,19 @@ func (fs *FileServer) handleMessage(from string, msg Message) error {
 }
 
 // handleMessageGetFileRequest handles a request to get a file from a peer.
-func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetFileRequest) error {
-	logging.Info("message get file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
+func (fs *FileServer) handleMessageGetFileRequest(peer *Peer, msg MessageGetFileRequest) error {
+	logging.Info("message get file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
 
 	// Lock the peer for sending a response
-	if err := peer.Lock(); err != nil {
+	if err := peer.conn.Lock(); err != nil {
 		return err
 	}
 
 	resp := MessageGetFileResponse{}
 
 	// Check if file exists in local store
-	if !fs.store.Has(msg.Key) {
-		logging.Info("file does not exist", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+	if !fs.store.Has(store.GenKey(peer.conn.RemoteAddr().String(), msg.Key)) {
+		logging.Info("file does not exist", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 		// Set response flags for non-existent file
 		resp.Exists = false
@@ -59,16 +62,16 @@ func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetF
 		return nil
 	}
 
-	logging.Info("file exists. processing...", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+	logging.Info("file exists. processing...", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Read file data from local store
-	n, f, err := fs.store.Read(msg.Key)
+	n, f, err := fs.store.Read(store.GenKey(peer.BaseAddr, msg.Key))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	logging.Info("file read", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+	logging.Info("file read", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Set response flags for existing file
 	resp.Exists = true
@@ -81,7 +84,7 @@ func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetF
 		return err
 	}
 
-	logging.Info("writing file to peer", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+	logging.Info("writing file to peer", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Copy file data to peer
 
@@ -93,24 +96,42 @@ func (fs *FileServer) handleMessageGetFileRequest(peer p2p.Peer, msg MessageGetF
 		return err
 	}
 
-	logging.Info("file transfer completed", "listenAddr", fs.Transport.Addr(), "peer", peer.RemoteAddr().String())
+	logging.Info("file transfer completed", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	return nil
 }
 
 // handleMessageStoreFile handles a request to store a file from a peer.
-func (fs *FileServer) handleMessageStoreFile(peer p2p.Peer, msg MessageStoreFile) error {
-	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "size", msg.FileSize)
+func (fs *FileServer) handleMessageStoreFile(peer *Peer, msg MessageStoreFile) error {
+	defer peer.conn.UnLock()
+
+	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.conn.RemoteAddr().String(), "size", msg.FileSize)
+
+	fileWriter, err := fs.store.NewFile(store.GenKey(peer.BaseAddr, msg.Key))
+	if err != nil {
+		return err
+	}
+	defer fileWriter.Close()
 
 	// Write file data received from peer to local store
-	n, err := fs.store.WriteEncrypt(msg.Key, io.LimitReader(peer, msg.FileSize))
+	n, err := fs.Encrypter.Encrypt(io.LimitReader(peer, msg.FileSize), fileWriter)
 
-	logging.Debug("File Server store called. read done", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.RemoteAddr().String(), "writtenSize", n, "calledSize", msg.FileSize)
+	logging.Debug("File Server store called. read done", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.conn.RemoteAddr().String(), "writtenSize", n, "calledSize", msg.FileSize)
 
 	// Unlock peer after writing file
-	peer.UnLock()
 
 	return err
+}
+
+func (fs *FileServer) handleMessageIdentifyPeer(peer *Peer, msg MessageIdentifyPeer) error {
+	fs.peerLock.Lock()
+	defer fs.peerLock.Unlock()
+
+	peer.Name = msg.Name
+	peer.BaseAddr = msg.BaseAddr
+	peer.TransportAddr = msg.TransportAddr
+
+	return nil
 }
 
 // MessageGetFileRequest defines the structure of a file retrieval request message.
@@ -130,9 +151,17 @@ type MessageStoreFile struct {
 	FileSize int64
 }
 
+// MessageIdentifyPeer defines the peer information
+type MessageIdentifyPeer struct {
+	TransportAddr string
+	Name          string
+	BaseAddr      string
+}
+
 // init registers message types with gob for serialization.
 func init() {
 	gob.Register(MessageGetFileRequest{})
 	gob.Register(MessageGetFileResponse{})
 	gob.Register(MessageStoreFile{})
+	gob.Register(MessageIdentifyPeer{})
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 
 	"github.com/esmailemami/fstore/internal/fileserver"
 	"github.com/esmailemami/fstore/internal/p2p"
@@ -50,12 +51,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// for i := 0; i < 100; i++ {
-	// 	_, err := s3.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// }
+	for i := 0; i < 100; i++ {
+		_, err := s3.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	n, r, err := s3.Get(key)
 	if err != nil {
