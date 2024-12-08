@@ -124,13 +124,33 @@ func (fs *FileServer) Start() error {
 // bootstrapNodes connects to the specified bootstrap nodes.
 func (fs *FileServer) bootstrapNodes() error {
 	for _, addr := range fs.BootstrapNodes {
-		logging.Debug("[FileServer] dialing", "listenAddr", fs.Transport.Addr(), "addr", addr)
-
-		// Dial each bootstrap node
-		if err := fs.Transport.Dial(addr); err != nil {
-			logging.WarnE("[FileServer] failed to dial node", err, "listenAddr", fs.Transport.Addr(), "boostrapAddr", addr)
+		if err := fs.dial(addr); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (fs *FileServer) AddNode(addrList ...string) error {
+	fs.BootstrapNodes = append(fs.BootstrapNodes, addrList...)
+
+	for _, addr := range addrList {
+		if err := fs.dial(addr); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (fs *FileServer) dial(addr string) error {
+	logging.Debug("[FileServer] dialing", "listenAddr", fs.Transport.Addr(), "addr", addr)
+
+	// Dial each bootstrap node
+	if err := fs.Transport.Dial(addr); err != nil {
+		logging.WarnE("[FileServer] failed to dial node", err, "listenAddr", fs.Transport.Addr(), "boostrapAddr", addr)
+		return err
 	}
 
 	return nil
@@ -295,6 +315,9 @@ func (fs *FileServer) getFromPeers(encKey string) (int64, io.Reader, error) {
 		// Read response from peer
 		getFileResponse, err := fs.readGetFileResponse(peer.conn)
 		if err != nil || !getFileResponse.Exists {
+			// unlock the peer
+			peer.conn.UnLock()
+
 			continue
 		}
 
@@ -307,13 +330,19 @@ func (fs *FileServer) getFromPeers(encKey string) (int64, io.Reader, error) {
 
 		fileWriter, err := fs.store.NewFile(store.NewKey(encKey))
 		if err != nil {
+			// unlock the peer
+			peer.conn.UnLock()
 			return 0, nil, err
 		}
-		defer fileWriter.Close()
-
 		if _, err := fs.Encrypter.Decrypt(io.LimitReader(peer, getFileResponse.Size), fileWriter); err != nil {
+			// unlock the peer
+			peer.conn.UnLock()
 			return 0, nil, err
 		}
+		fileWriter.Close()
+
+		// unlock the peer
+		peer.conn.UnLock()
 
 		fileExists = true
 		break

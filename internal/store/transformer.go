@@ -133,15 +133,3 @@ func MD5PathTransformFunc(key Key) PathKey {
 		FileName: hashStr,
 	}
 }
-
-func parseKey(key string) (string, string) {
-	prefixArr := strings.Split(key, "/")
-
-	var prefix string
-	if len(prefixArr) > 1 {
-		prefix = prefixArr[0]
-		key = strings.TrimPrefix(key, prefix)
-	}
-
-	return prefix, key
-}
