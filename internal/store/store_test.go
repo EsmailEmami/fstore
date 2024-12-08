@@ -19,7 +19,7 @@ func TestStoreWriteAndRead(t *testing.T) {
 	key := "myFile.jpg"
 	buf := bytes.NewReader([]byte("oh this is my nude!!!"))
 
-	n, err := store.Write(key, buf)
+	n, err := store.Write(NewKey(key), buf)
 
 	assert.Nil(t, err)
 	fmt.Printf("written size: %d\n", n)
@@ -31,7 +31,7 @@ func TestStoreWriteAndRead(t *testing.T) {
 
 	// fmt.Printf("read size: %d\n", wn)
 
-	_, r, err := store.Read(key)
+	_, r, err := store.Read(NewKey(key))
 	assert.Nil(t, err)
 	defer r.Close()
 

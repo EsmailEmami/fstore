@@ -48,7 +48,7 @@ func (fs *FileServer) handleMessageGetFileRequest(peer *Peer, msg MessageGetFile
 	resp := MessageGetFileResponse{}
 
 	// Check if file exists in local store
-	if !fs.store.Has(store.GenKey(peer.conn.RemoteAddr().String(), msg.Key)) {
+	if !fs.store.Has(store.NewKey(peer.conn.RemoteAddr().String(), msg.Key)) {
 		logging.Info("file does not exist", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 		// Set response flags for non-existent file
@@ -65,7 +65,7 @@ func (fs *FileServer) handleMessageGetFileRequest(peer *Peer, msg MessageGetFile
 	logging.Info("file exists. processing...", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Read file data from local store
-	n, f, err := fs.store.Read(store.GenKey(peer.BaseAddr, msg.Key))
+	n, f, err := fs.store.Read(store.NewKey(peer.BaseAddr, msg.Key))
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (fs *FileServer) handleMessageStoreFile(peer *Peer, msg MessageStoreFile) e
 
 	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.conn.RemoteAddr().String(), "size", msg.FileSize)
 
-	fileWriter, err := fs.store.NewFile(store.GenKey(peer.BaseAddr, msg.Key))
+	fileWriter, err := fs.store.NewFile(store.NewKey(peer.BaseAddr, msg.Key))
 	if err != nil {
 		return err
 	}

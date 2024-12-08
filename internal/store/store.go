@@ -22,13 +22,13 @@ func NewStore(opts StoreOpts) *Store {
 	return s
 }
 
-func (s *Store) Has(key string) bool {
+func (s *Store) Has(key Key) bool {
 	filepath := s.fullFilePath(key)
 	_, err := os.Stat(filepath)
 	return !errors.Is(err, os.ErrNotExist)
 }
 
-func (s *Store) Write(key string, r io.Reader) (int64, error) {
+func (s *Store) Write(key Key, r io.Reader) (int64, error) {
 	f, err := s.openFileForWritting(key)
 	if err != nil {
 		return 0, err
@@ -37,7 +37,7 @@ func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return io.Copy(f, r)
 }
 
-func (s *Store) NewFile(key string) (io.WriteCloser, error) {
+func (s *Store) NewFile(key Key) (io.WriteCloser, error) {
 	f, err := s.openFileForWritting(key)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (s *Store) NewFile(key string) (io.WriteCloser, error) {
 	return f, nil
 }
 
-func (s *Store) Read(key string) (int64, io.ReadCloser, error) {
+func (s *Store) Read(key Key) (int64, io.ReadCloser, error) {
 	filePath := s.fullFilePath(key)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -61,7 +61,7 @@ func (s *Store) Read(key string) (int64, io.ReadCloser, error) {
 	return fi.Size(), file, nil
 }
 
-func (s *Store) openFileForWritting(key string) (*os.File, error) {
+func (s *Store) openFileForWritting(key Key) (*os.File, error) {
 	pathKey := s.PathTransformFunc(key)
 	dirPath := pathKey.FullDirectoryPath(s.RootPath)
 
@@ -73,11 +73,7 @@ func (s *Store) openFileForWritting(key string) (*os.File, error) {
 	return os.Create(filePath)
 }
 
-func (s *Store) fullFilePath(key string) string {
+func (s *Store) fullFilePath(key Key) string {
 	pathKey := s.PathTransformFunc(key)
 	return pathKey.FullFilePath(s.RootPath)
-}
-
-func GenKey(base, key string) string {
-	return base + "/" + key
 }

@@ -212,7 +212,7 @@ func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
 	tee := io.TeeReader(r, fileBuffer)
 
 	// Write to local store
-	n, err := fs.store.Write(encKey, tee)
+	n, err := fs.store.Write(store.NewKey(encKey), tee)
 	if err != nil {
 		return 0, err
 	}
@@ -260,7 +260,7 @@ func (fs *FileServer) storeFileToPeers(encKey string, fileSize int64, mu io.Writ
 
 // Get retrieves a file identified by key from local storage or peers.
 func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
-	encKey := fs.KeyEncrypter.Encrypt(key)
+	encKey := store.NewKey(fs.KeyEncrypter.Encrypt(key))
 
 	// Check if file exists in local storage
 	if fs.store.Has(encKey) {
@@ -270,7 +270,7 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 	logging.Info("[FileServer] file not found in local storage. trying to find from peers...", "listenAddr", fs.Transport.Addr())
 
 	// Try to retrieve from peers
-	return fs.getFromPeers(encKey)
+	return fs.getFromPeers(encKey.Value)
 }
 
 // getFromPeers attempts to retrieve the file from connected peers.
@@ -305,7 +305,7 @@ func (fs *FileServer) getFromPeers(encKey string) (int64, io.Reader, error) {
 		// 	return 0, nil, err
 		// }
 
-		fileWriter, err := fs.store.NewFile(encKey)
+		fileWriter, err := fs.store.NewFile(store.NewKey(encKey))
 		if err != nil {
 			return 0, nil, err
 		}
@@ -321,7 +321,7 @@ func (fs *FileServer) getFromPeers(encKey string) (int64, io.Reader, error) {
 
 	// Return file data from local store if found
 	if fileExists {
-		return fs.store.Read(encKey)
+		return fs.store.Read(store.NewKey(encKey))
 	}
 
 	// Return error if file not found
