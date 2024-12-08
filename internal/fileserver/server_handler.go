@@ -39,7 +39,7 @@ func (fs *FileServer) handleMessage(from string, msg Message) error {
 
 // handleMessageGetFileRequest handles a request to get a file from a peer.
 func (fs *FileServer) handleMessageGetFileRequest(peer *Peer, msg MessageGetFileRequest) error {
-	logging.Info("message get file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
+	logging.Info("message get file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Lock the peer for sending a response
 	if err := peer.conn.Lock(); err != nil {
@@ -108,7 +108,7 @@ func (fs *FileServer) handleMessageStoreFile(peer *Peer, msg MessageStoreFile) e
 
 	logging.Debug("File Server store called. reading...", "listenAddr", fs.Transport.Addr(), "peerAddr", peer.conn.RemoteAddr().String(), "size", msg.FileSize)
 
-	fileWriter, err := fs.store.NewFile(store.NewKey(peer.BaseAddr, msg.Key))
+	fileWriter, err := fs.store.NewWriter(store.NewKey(peer.BaseAddr, msg.Key), fs.Encrypter.Size(msg.FileSize))
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (fs *FileServer) handleMessageIdentifyPeer(peer *Peer, msg MessageIdentifyP
 }
 
 func (fs *FileServer) handleMessageDeleteFile(peer *Peer, msg MessageDeleteFile) error {
-	logging.Info("message delete file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
+	logging.Info("message delete file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 	// Check if file exists in local store
 	if !fs.store.Has(store.NewKey(peer.BaseAddr, msg.Key)) {

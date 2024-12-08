@@ -38,6 +38,10 @@ func (p PathKey) FullFilePath(prefix ...string) string {
 	return path.Join(pathSlice...)
 }
 
+func (p PathKey) String() string {
+	return path.Join(p.FilePath, p.FileName)
+}
+
 type Key struct {
 	Directory string
 	Value     string

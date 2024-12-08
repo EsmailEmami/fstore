@@ -10,16 +10,16 @@ import (
 )
 
 func TestStoreWriteAndRead(t *testing.T) {
-	opts := StoreOpts{
+	opts := PhysicalStoreOpts{
 		RootPath:          "test_esi_network",
 		PathTransformFunc: SHA256PathTransformFunc,
 	}
-	store := NewStore(opts)
+	store := NewPhysicalStore(opts)
 
 	key := "myFile.jpg"
 	buf := bytes.NewReader([]byte("oh this is my nude!!!"))
 
-	n, err := store.Write(NewKey(key), buf)
+	n, err := store.Write(NewKey(key), buf, buf.Size())
 
 	assert.Nil(t, err)
 	fmt.Printf("written size: %d\n", n)

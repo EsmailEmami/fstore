@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"log"
 	"strconv"
 
 	"github.com/esmailemami/fstore/internal/fileserver"
 	"github.com/esmailemami/fstore/internal/p2p"
+	"github.com/esmailemami/fstore/pkg/logging"
 )
 
 func newServer(listenAddr string, encKey []byte, nodes ...string) *fileserver.FileServer {
@@ -50,55 +53,48 @@ func main() {
 	}
 
 	//
-	// key := "supersecurefile.png"
-	// content := []byte("7 bytes")
+	key := "supersecurefile.png"
+	content := []byte("7 bytes")
 
-	// _, err := s3.Store(key, bytes.NewReader(content))
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	_, err := s3.Store(key, bytes.NewReader(content), -1)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	for i := 0; i < 10; i++ {
-		_, err := s3.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
+		_, err := s3.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))), -1)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
 	for i := 0; i < 10; i++ {
-		_, err := s2.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
+		_, err := s2.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))), -1)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
 	for i := 0; i < 10; i++ {
-		_, err := s1.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))))
+		_, err := s1.Store("file"+strconv.Itoa(i)+".jpg", bytes.NewReader([]byte("this is number "+strconv.Itoa(i))), -1)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	// n, r, err := s3.Get(key)
-	// if err != nil {
-	// 	logging.ErrorE(err.Error(), err)
-	// 	select {}
-	// }
+	n, r, err := s3.Get(key)
+	if err != nil {
+		logging.ErrorE(err.Error(), err)
+		select {}
+	}
 
-	// buf, err := io.ReadAll(r)
-	// if err != nil {
-	// 	logging.ErrorE(err.Error(), err)
-	// } else {
-	// 	fmt.Println("file size:", n)
-	// 	fmt.Println("content:", string(buf))
-	// }
-
-	// for i := 0; i < 100; i++ {
-	// 	err := s3.Delete("file" + strconv.Itoa(i) + ".jpg")
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// }
+	buf, err := io.ReadAll(r)
+	if err != nil {
+		logging.ErrorE(err.Error(), err)
+	} else {
+		fmt.Println("file size:", n)
+		fmt.Println("content:", string(buf))
+	}
 
 	select {}
 }

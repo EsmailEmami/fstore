@@ -1,93 +1,13 @@
 package store
 
 import (
-	"errors"
 	"io"
-	"os"
 )
 
-// Error definitions
-var (
-	ErrFileNotExists = errors.New("sorry. file not found")
-)
-
-type StoreOpts struct {
-	RootPath          string
-	PathTransformFunc PathTransformFunc
-}
-
-type Store struct {
-	StoreOpts
-}
-
-func NewStore(opts StoreOpts) *Store {
-	s := &Store{
-		StoreOpts: opts,
-	}
-	return s
-}
-
-func (s *Store) Has(key Key) bool {
-	filepath := s.fullFilePath(key)
-	_, err := os.Stat(filepath)
-	return !errors.Is(err, os.ErrNotExist)
-}
-
-func (s *Store) Write(key Key, r io.Reader) (int64, error) {
-	f, err := s.openFileForWritting(key)
-	if err != nil {
-		return 0, err
-	}
-
-	return io.Copy(f, r)
-}
-
-func (s *Store) NewFile(key Key) (io.WriteCloser, error) {
-	f, err := s.openFileForWritting(key)
-	if err != nil {
-		return nil, err
-	}
-
-	return f, nil
-}
-
-func (s *Store) Read(key Key) (int64, io.ReadCloser, error) {
-	filePath := s.fullFilePath(key)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	fi, err := file.Stat()
-	if err != nil {
-		return 0, nil, err
-	}
-
-	return fi.Size(), file, nil
-}
-
-func (s *Store) Delete(key Key) error {
-	if !s.Has(key) {
-		return ErrFileNotExists
-	}
-	filepath := s.fullFilePath(key)
-
-	return os.Remove(filepath)
-}
-
-func (s *Store) openFileForWritting(key Key) (*os.File, error) {
-	pathKey := s.PathTransformFunc(key)
-	dirPath := pathKey.FullDirectoryPath(s.RootPath)
-
-	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		return nil, err
-	}
-
-	filePath := pathKey.FullFilePath(s.RootPath)
-	return os.Create(filePath)
-}
-
-func (s *Store) fullFilePath(key Key) string {
-	pathKey := s.PathTransformFunc(key)
-	return pathKey.FullFilePath(s.RootPath)
+type Store interface {
+	Has(key Key) bool
+	Write(key Key, r io.Reader, size int64) (int64, error)
+	NewWriter(key Key, size int64) (io.WriteCloser, error)
+	Read(key Key) (int64, io.ReadCloser, error)
+	Delete(key Key) error
 }

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/esmailemami/fstore/internal/p2p"
@@ -65,7 +65,7 @@ func (f *FileServerOpts) prepare() {
 // FileServer represents a server that manages file storage and communication with peers.
 type FileServer struct {
 	FileServerOpts                  // Embedded configuration options
-	store          *store.Store     // Local file storage
+	store          store.Store      // Local file storage
 	peerLock       sync.RWMutex     // Mutex for peers map access
 	peers          map[string]*Peer // Map of connected peers
 	quitch         chan struct{}    // Channel for quitting
@@ -75,15 +75,30 @@ type FileServer struct {
 func NewFileServer(opts FileServerOpts) *FileServer {
 	opts.prepare()
 
-	// Configure store options
-	storeOpts := store.StoreOpts{
-		RootPath:          fmt.Sprintf("storage/server%s", opts.Transport.Addr()),
-		PathTransformFunc: store.SHA256PathTransformFunc,
-		//Encrypter:         opts.Encrypter,
-	}
+	// // Configure store options
+	// storeOpts := store.PhysicalStoreOpts{
+	// 	RootPath:          fmt.Sprintf("storage/server%s", opts.Transport.Addr()),
+	// 	PathTransformFunc: store.SHA256PathTransformFunc,
+	// 	//Encrypter:         opts.Encrypter,
+	// }
 
-	// Create a new store instance
-	store := store.NewStore(storeOpts)
+	// // Create a new store instance
+	// store := store.NewPhysicalStore(storeOpts)
+
+	store, err := store.NewS3Store(store.S3StoreOpts{
+		PathTransformFunc: store.SHA256PathTransformFunc,
+		Endpoint:          "localhost:9000",
+		AccessKey:         "6QfSsP6Kh8WwRfsJBn1R",
+		SecretKey:         "RZGO3iIKWP6uc96H161Dz3xS5JtGTfSYXfjrI6dI",
+		Region:            "us-east-1",
+		BucketName:        "esi-bucket",
+		Secure:            false,
+		RootPath:          opts.Transport.Addr(),
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Initialize FileServer instance
 	fs := &FileServer{
@@ -223,7 +238,7 @@ func (fs *FileServer) onConnectPeer(peer p2p.Peer) {
 }
 
 // Store stores a file from the given reader to local storage and peers.
-func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
+func (fs *FileServer) Store(key string, r io.Reader, size int64) (int64, error) {
 	// Encrypt key
 	encKey := fs.KeyEncrypter.Encrypt(key)
 
@@ -231,8 +246,20 @@ func (fs *FileServer) Store(key string, r io.Reader) (int64, error) {
 	fileBuffer := new(bytes.Buffer)
 	tee := io.TeeReader(r, fileBuffer)
 
+	// testBuf := []byte("the bytes")
+
+	// fileWriter, err := fs.store.NewWriter(store.NewKey(encKey), int64(len(testBuf)))
+	// if err != nil {
+	// 	return 0, err
+	// }
+	// defer fileWriter.Close()
+
+	// // Write file data received from peer to local store
+	// nn, err := fileWriter.Write(testBuf)
+
+	// n := int64(nn)
 	// Write to local store
-	n, err := fs.store.Write(store.NewKey(encKey), tee)
+	n, err := fs.store.Write(store.NewKey(encKey), tee, size)
 	if err != nil {
 		return 0, err
 	}
@@ -328,7 +355,7 @@ func (fs *FileServer) getFromPeers(encKey string) (int64, io.Reader, error) {
 		// 	return 0, nil, err
 		// }
 
-		fileWriter, err := fs.store.NewFile(store.NewKey(encKey))
+		fileWriter, err := fs.store.NewWriter(store.NewKey(encKey), getFileResponse.Size)
 		if err != nil {
 			// unlock the peer
 			peer.conn.UnLock()
