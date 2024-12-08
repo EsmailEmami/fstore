@@ -45,7 +45,7 @@ type Key struct {
 
 func NewKey(key ...string) Key {
 	return Key{
-		Directory: path.Join(key[:1]...),
+		Directory: path.Join(key[:len(key)-1]...),
 		Value:     key[len(key)-1],
 	}
 }

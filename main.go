@@ -72,5 +72,12 @@ func main() {
 		fmt.Println("content:", string(buf))
 	}
 
+	for i := 0; i < 100; i++ {
+		err := s3.Delete("file" + strconv.Itoa(i) + ".jpg")
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	select {}
 }

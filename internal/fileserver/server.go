@@ -339,6 +339,32 @@ func (fs *FileServer) readGetFileResponse(peer p2p.Peer) (*MessageGetFileRespons
 	return &resp, nil
 }
 
+func (fs *FileServer) Delete(key string) error {
+	encKey := store.NewKey(fs.KeyEncrypter.Encrypt(key))
+
+	if !fs.store.Has(encKey) {
+		return ErrFileNotExists
+	}
+
+	if err := fs.store.Delete(encKey); err != nil {
+		return err
+	}
+
+	return fs.deleteFromPeers(encKey.Value)
+}
+
+func (fs *FileServer) deleteFromPeers(encKey string) error {
+	mu := fs.multiWriter()
+
+	msg := Message{
+		Payload: MessageDeleteFile{
+			Key: encKey,
+		},
+	}
+
+	return fs.sendMessage(mu, &msg)
+}
+
 // readMessage reads and decodes a message from the given reader.
 func (fs *FileServer) readMessage(r io.Reader) (*Message, error) {
 	var size int64

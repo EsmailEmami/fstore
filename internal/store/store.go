@@ -6,6 +6,11 @@ import (
 	"os"
 )
 
+// Error definitions
+var (
+	ErrFileNotExists = errors.New("sorry. file not found")
+)
+
 type StoreOpts struct {
 	RootPath          string
 	PathTransformFunc PathTransformFunc
@@ -59,6 +64,15 @@ func (s *Store) Read(key Key) (int64, io.ReadCloser, error) {
 	}
 
 	return fi.Size(), file, nil
+}
+
+func (s *Store) Delete(key Key) error {
+	if !s.Has(key) {
+		return ErrFileNotExists
+	}
+	filepath := s.fullFilePath(key)
+
+	return os.Remove(filepath)
 }
 
 func (s *Store) openFileForWritting(key Key) (*os.File, error) {

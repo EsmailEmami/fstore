@@ -29,7 +29,8 @@ func (fs *FileServer) handleMessage(from string, msg Message) error {
 		return fs.handleMessageStoreFile(peer, payload)
 	case MessageIdentifyPeer:
 		return fs.handleMessageIdentifyPeer(peer, payload)
-
+	case MessageDeleteFile:
+		return fs.handleMessageDeleteFile(peer, payload)
 	}
 
 	// Return error for unexpected message type
@@ -48,7 +49,7 @@ func (fs *FileServer) handleMessageGetFileRequest(peer *Peer, msg MessageGetFile
 	resp := MessageGetFileResponse{}
 
 	// Check if file exists in local store
-	if !fs.store.Has(store.NewKey(peer.conn.RemoteAddr().String(), msg.Key)) {
+	if !fs.store.Has(store.NewKey(peer.BaseAddr, msg.Key)) {
 		logging.Info("file does not exist", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
 
 		// Set response flags for non-existent file
@@ -134,6 +135,29 @@ func (fs *FileServer) handleMessageIdentifyPeer(peer *Peer, msg MessageIdentifyP
 	return nil
 }
 
+func (fs *FileServer) handleMessageDeleteFile(peer *Peer, msg MessageDeleteFile) error {
+	logging.Info("message delete file called.", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String(), "storeAddr", fs.store.RootPath)
+
+	// Check if file exists in local store
+	if !fs.store.Has(store.NewKey(peer.BaseAddr, msg.Key)) {
+		logging.Info("file does not exist", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
+
+		return nil
+	}
+
+	logging.Info("file exists. processing...", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
+
+	// Read file data from local store
+	err := fs.store.Delete(store.NewKey(peer.BaseAddr, msg.Key))
+	if err != nil {
+		return err
+	}
+
+	logging.Info("file deleted successfully", "listenAddr", fs.Transport.Addr(), "peer", peer.conn.RemoteAddr().String())
+
+	return nil
+}
+
 // MessageGetFileRequest defines the structure of a file retrieval request message.
 type MessageGetFileRequest struct {
 	Key string
@@ -158,10 +182,16 @@ type MessageIdentifyPeer struct {
 	BaseAddr      string
 }
 
+// MessageDeleteFilet defines the structure of a file message.
+type MessageDeleteFile struct {
+	Key string
+}
+
 // init registers message types with gob for serialization.
 func init() {
 	gob.Register(MessageGetFileRequest{})
 	gob.Register(MessageGetFileResponse{})
 	gob.Register(MessageStoreFile{})
 	gob.Register(MessageIdentifyPeer{})
+	gob.Register(MessageDeleteFile{})
 }
